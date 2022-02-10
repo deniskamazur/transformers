@@ -111,6 +111,7 @@ class GPTJConfig(PretrainedConfig):
         bos_token_id=50256,
         eos_token_id=50256,
         tie_word_embeddings=False,
+        eight_bit=False,
         **kwargs
     ):
         self.vocab_size = vocab_size
@@ -131,6 +132,8 @@ class GPTJConfig(PretrainedConfig):
 
         self.bos_token_id = bos_token_id
         self.eos_token_id = eos_token_id
+
+        self.eight_bit = eight_bit
 
         super().__init__(
             bos_token_id=bos_token_id, eos_token_id=eos_token_id, tie_word_embeddings=tie_word_embeddings, **kwargs

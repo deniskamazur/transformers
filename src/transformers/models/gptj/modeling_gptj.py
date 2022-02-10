@@ -33,6 +33,7 @@ from ...modeling_utils import PreTrainedModel
 from ...utils import logging
 from ...utils.model_parallel_utils import assert_device_map, get_device_map
 from .configuration_gptj import GPTJConfig
+from .quantization import convert_to_int8
 
 
 logger = logging.get_logger(__name__)
@@ -266,6 +267,10 @@ class GPTJBlock(nn.Module):
         self.attn = GPTJAttention(config)
         self.mlp = GPTJMLP(inner_dim, config)
 
+        if config.eight_bit:
+            convert_to_int8(self.attn)
+            convert_to_int8(self.mlp)
+
     def forward(
         self,
         hidden_states,
@@ -465,6 +470,9 @@ class GPTJModel(GPTJPreTrainedModel):
 
         # Initialize weights and apply final processing
         self.post_init()
+
+        if config.eight_bit:
+            convert_to_int8(self)
 
     @add_start_docstrings(PARALLELIZE_DOCSTRING)
     def parallelize(self, device_map=None):
@@ -701,6 +709,9 @@ class GPTJForCausalLM(GPTJPreTrainedModel):
 
         # Initialize weights and apply final processing
         self.post_init()
+
+        if config.eight_bit:
+            convert_to_int8(self)
 
     @add_start_docstrings(PARALLELIZE_DOCSTRING)
     def parallelize(self, device_map=None):
