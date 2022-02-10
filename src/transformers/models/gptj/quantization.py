@@ -23,32 +23,6 @@ def quantize_blockise_lowmemory(matrix: torch.Tensor, chunk_size: int = 2**20):
     return matrix_i8, (absmax, code)
 
 
-class FrozenBNBLinear(nn.Module):
-    def __init__(self, weight, absmax, code, bias=None):
-        assert isinstance(bias, nn.Parameter) or bias is None
-        super().__init__()
-        self.out_features, self.in_features = weight.shape
-        self.register_buffer("weight", weight.requires_grad_(False))
-        self.register_buffer("absmax", absmax.requires_grad_(False))
-        self.register_buffer("code", code.requires_grad_(False))
-        self.adapter = None
-        self.bias = bias
-
-    def forward(self, input):
-        output = DequantizeAndLinear.apply(input, self.weight, self.absmax, self.code, self.bias)
-        if self.adapter:
-            output += self.adapter(input)
-        return output
-
-    @classmethod
-    def from_linear(cls, linear: nn.Linear) -> "FrozenBNBLinear":
-        weights_int8, state = quantize_blockise_lowmemory(linear.weight)
-        return cls(weights_int8, *state, linear.bias)
-
-    def __repr__(self):
-        return f"{self.__class__.__name__}({self.in_features}, {self.out_features})"
-
-
 class DequantizeAndLinear(torch.autograd.Function):
     @staticmethod
     @custom_fwd
@@ -77,6 +51,25 @@ class DequantizeAndLinear(torch.autograd.Function):
         return grad_input, None, None, None, grad_bias
 
 
+class FrozenBNBLinear(nn.Module):
+    def __init__(self, weight, absmax, code, bias=None):
+        assert isinstance(bias, nn.Parameter) or bias is None
+        super().__init__()
+        self.out_features, self.in_features = weight.shape
+        self.register_buffer("weight", weight.requires_grad_(False))
+        self.register_buffer("absmax", absmax.requires_grad_(False))
+        self.register_buffer("code", code.requires_grad_(False))
+        self.bias = bias
+
+    def forward(self, input):
+        return DequantizeAndLinear.apply(input, self.weight, self.absmax, self.code, self.bias)
+
+    @classmethod
+    def from_linear(cls, linear: nn.Linear) -> "FrozenBNBLinear":
+        weights_int8, state = quantize_blockise_lowmemory(linear.weight)
+        return cls(weights_int8, *state, linear.bias)
+
+
 class FrozenBNBEmbedding(nn.Module):
     def __init__(self, weight, absmax, code):
         super().__init__()
@@ -84,24 +77,19 @@ class FrozenBNBEmbedding(nn.Module):
         self.register_buffer("weight", weight.requires_grad_(False))
         self.register_buffer("absmax", absmax.requires_grad_(False))
         self.register_buffer("code", code.requires_grad_(False))
-        self.adapter = None
 
     def forward(self, input, **kwargs):
         with torch.no_grad():
             # note: both quantuized weights and input indices are *not* differentiable
             weight_deq = dequantize_blockwise(self.weight, absmax=self.absmax, code=self.code)
             output = F.embedding(input, weight_deq, **kwargs)
-        if self.adapter:
-            output += self.adapter(input)
+
         return output
 
     @classmethod
     def from_embedding(cls, embedding: nn.Embedding) -> "FrozenBNBEmbedding":
         weights_int8, state = quantize_blockise_lowmemory(embedding.weight)
         return cls(weights_int8, *state)
-
-    def __repr__(self):
-        return f"{self.__class__.__name__}({self.num_embeddings}, {self.embedding_dim})"
 
 
 def convert_to_int8(model):
